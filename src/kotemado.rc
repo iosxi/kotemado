@@ -45,7 +45,7 @@ END
 // ------------------------------------------------------------------
 //  ルールの編集
 // ------------------------------------------------------------------
-IDD_RULE DIALOGEX 0, 0, 340, 340
+IDD_RULE DIALOGEX 0, 0, 340, 368
 STYLE DS_SHELLFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "ルールの編集"
 FONT 9, "Yu Gothic UI", 400, 0, 0x80
@@ -56,7 +56,7 @@ BEGIN
 
     LTEXT           "対象のウィンドウ", IDC_H_TARGET, 12, 30, 200, 11
     CONTROL         "", IDC_FINDER, "Static", SS_OWNERDRAW | SS_NOTIFY, 12, 44, 20, 20
-    LTEXT           "左の照準をつかみ、目的のウィンドウまでドラッグして離すと、下の欄が埋まります。",
+    LTEXT           "左の照準をクリックし、続けて目的のウィンドウをクリックすると、下の欄が埋まります。",
                     IDC_FINDER_HINT, 40, 44, 288, 9
     LTEXT           "", IDC_FINDER_INFO, 40, 55, 288, 9, SS_NOPREFIX | SS_ENDELLIPSIS
 
@@ -97,21 +97,24 @@ BEGIN
 
     LTEXT           "タイミング", IDC_H_TIMING, 12, 272, 200, 11
     LTEXT           "適用(&N)", -1, 12, 288, 54, 9
-    COMBOBOX        IDC_WHEN, 68, 286, 160, 100, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "遅延(&R)", -1, 236, 288, 28, 9
-    EDITTEXT        IDC_DELAY, 266, 286, 36, 14, ES_NUMBER | ES_AUTOHSCROLL
-    LTEXT           "ミリ秒", -1, 306, 288, 24, 9
-    LTEXT           "表示の直後に自分で位置を戻すアプリには、遅延を 200〜500 ミリ秒ほど入れます。",
-                    IDC_HINT_DELAY, 68, 303, 260, 9
+    COMBOBOX        IDC_WHEN, 68, 286, 150, 100, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "間隔(&I)", IDC_INTERVAL_LBL, 228, 288, 34, 9
+    EDITTEXT        IDC_INTERVAL, 266, 286, 36, 14, ES_NUMBER | ES_AUTOHSCROLL
+    LTEXT           "ミリ秒", IDC_INTERVAL_UNIT, 306, 288, 24, 9
+    LTEXT           "遅延(&R)", -1, 12, 306, 54, 9
+    EDITTEXT        IDC_DELAY, 68, 304, 36, 14, ES_NUMBER | ES_AUTOHSCROLL
+    LTEXT           "ミリ秒", -1, 108, 306, 24, 9
+    LTEXT           "「定期的に」は間隔ごとに位置を確かめ、ずれていたら戻します。遅延は、表示の直後に自分で位置を戻すアプリ向けです（200〜500 ミリ秒ほど）。",
+                    IDC_HINT_DELAY, 68, 322, 260, 19
 
-    PUSHBUTTON      "今すぐ試す(&Z)", IDC_TRY, 12, 320, 64, 15
-    DEFPUSHBUTTON   "OK", IDOK, 210, 320, 56, 15
-    PUSHBUTTON      "キャンセル", IDCANCEL, 272, 320, 56, 15
+    PUSHBUTTON      "今すぐ試す(&Z)", IDC_TRY, 12, 348, 64, 15
+    DEFPUSHBUTTON   "OK", IDOK, 210, 348, 56, 15
+    PUSHBUTTON      "キャンセル", IDCANCEL, 272, 348, 56, 15
 END
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,0,0,0
- PRODUCTVERSION 1,0,0,0
+ FILEVERSION 1,1,0,0
+ PRODUCTVERSION 1,1,0,0
  FILEOS VOS_NT_WINDOWS32
  FILETYPE VFT_APP
 BEGIN
@@ -121,9 +124,9 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "nekoryu"
             VALUE "FileDescription", "kotemado - ウィンドウの位置と大きさを固定"
-            VALUE "FileVersion", "1.0.0"
+            VALUE "FileVersion", "1.1.0"
             VALUE "ProductName", "kotemado"
-            VALUE "ProductVersion", "1.0.0"
+            VALUE "ProductVersion", "1.1.0"
             VALUE "Comments", "条件に合うウィンドウを、指定したディスプレイの指定した位置・大きさに置きます"
             VALUE "OriginalFilename", "kotemado.exe"
         END

@@ -416,15 +416,16 @@ int rule_apply(HWND h, const Rule *r)
 {
     WINDOWPLACEMENT wp;
     HMONITOR cm, tm;
-    RECT     wr, T;
+    RECT     wr, T, oldNormal;
     int      cur, want;
-    BOOL     ok = TRUE;
+    BOOL     ok = TRUE, did = FALSE;
 
     if (!IsWindow(h)) return AP_GONE;
     if (IsHungAppWindow(h)) return AP_HUNG;
 
     wp.length = sizeof(wp);
     if (!GetWindowPlacement(h, &wp)) return AP_FAILED;
+    oldNormal = wp.rcNormalPosition;
     cur  = IsIconic(h) ? ST_MIN : IsZoomed(h) ? ST_MAX : ST_NORMAL;
     want = r->state == ST_KEEP ? cur : r->state;
 
@@ -444,9 +445,10 @@ int rule_apply(HWND h, const Rule *r)
         calc_target(h, r, cur == ST_NORMAL, &wr, cm, tm, &T);
 
         if (cur == ST_NORMAL) {
-            ok = move_normal(h, r, &T, tm);
-            if (want == ST_MAX)      ShowWindow(h, SW_MAXIMIZE);
-            else if (want == ST_MIN) ShowWindow(h, SW_SHOWMINNOACTIVE);
+            /* すでにその位置・大きさなら触らない(定期適用で無駄に動かさないため) */
+            if (!EqualRect(&T, &wr)) { ok = move_normal(h, r, &T, tm); did = TRUE; }
+            if (want == ST_MAX)      { ShowWindow(h, SW_MAXIMIZE);        did = TRUE; }
+            else if (want == ST_MIN) { ShowWindow(h, SW_SHOWMINNOACTIVE); did = TRUE; }
         } else {
             POINT o = workspace_offset(h);
             wp.rcNormalPosition = T;
@@ -454,12 +456,17 @@ int rule_apply(HWND h, const Rule *r)
 
             if (want == cur && (cur == ST_MIN || tm == cm)) {
                 /* 状態はそのまま、元に戻したときの位置だけ差し替える */
-                wp.showCmd = SW_SHOWNA;
-                ok = SetWindowPlacement(h, &wp);
+                if (!EqualRect(&oldNormal, &wp.rcNormalPosition)) {
+                    wp.showCmd = SW_SHOWNA;
+                    ok  = SetWindowPlacement(h, &wp);
+                    did = TRUE;
+                }
             } else if (want == ST_MIN) {
                 wp.showCmd = SW_SHOWMINNOACTIVE;
-                ok = SetWindowPlacement(h, &wp);
+                ok  = SetWindowPlacement(h, &wp);
+                did = TRUE;
             } else {
+                did = TRUE;
                 /* いったん元の大きさに戻して目的のディスプレイへ移してから、必要なら最大化 */
                 wp.showCmd = SW_SHOWNOACTIVATE;
                 ok = SetWindowPlacement(h, &wp);
@@ -470,11 +477,16 @@ int rule_apply(HWND h, const Rule *r)
     }
 
     if (r->topmost != TOP_KEEP) {
-        if (!SetWindowPos(h, r->topmost == TOP_ON ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
-                          SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE))
-            ok = FALSE;
+        BOOL isTop = (GetWindowLongW(h, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+        if (isTop != (r->topmost == TOP_ON)) {
+            if (!SetWindowPos(h, r->topmost == TOP_ON ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
+                              SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE))
+                ok = FALSE;
+            did = TRUE;
+        }
     }
-    return ok ? AP_OK : AP_FAILED;
+    if (!ok) return AP_FAILED;
+    return did ? AP_OK : AP_SAME;
 }
 
 /* ------------------------------------------------------------------ */
@@ -484,15 +496,18 @@ int rule_apply(HWND h, const Rule *r)
 #define WM_ENG_CONFIG   (WM_APP + 10)
 #define WM_ENG_APPLYALL (WM_APP + 11)
 #define TIMER_PENDING   1
+#define TIMER_PERIODIC  2
 
 static HANDLE g_thread;
 static DWORD  g_tid;
 static HWND   g_engWnd;
 static HWND   g_desktop;
 static BOOL   g_anyTitle;       /* キャプションを条件にしたルールがあるか */
+static int    g_periodMs;       /* 「定期的に」のルールの最短の間隔。無ければ 0 */
 
-/* ウィンドウごとに、最後に当てたルール。「最初の 1 回だけ」の判定に使う */
-typedef struct { HWND h; UINT id; } Seen;
+/* ウィンドウごとに、最後に当てたルールと時刻。
+   「最初の 1 回だけ」の判定と、「定期的に」の見回りに使う */
+typedef struct { HWND h; UINT id; DWORD last; } Seen;
 #define SEEN_MAX 1024
 static Seen g_seen[SEEN_MAX];
 static int  g_nSeen;
@@ -519,7 +534,7 @@ static void seen_del(HWND h)
 static void seen_set(HWND h, UINT id)
 {
     int i = seen_find(h);
-    if (i >= 0) { g_seen[i].id = id; return; }
+    if (i >= 0) { g_seen[i].id = id; g_seen[i].last = GetTickCount(); return; }
     if (g_nSeen == SEEN_MAX) {
         /* 破棄の通知を取りこぼしたものを掃除する。それでも満杯なら古いものを捨てる */
         int j = 0;
@@ -530,8 +545,9 @@ static void seen_set(HWND h, UINT id)
             g_nSeen -= SEEN_MAX / 4;
         }
     }
-    g_seen[g_nSeen].h  = h;
-    g_seen[g_nSeen].id = id;
+    g_seen[g_nSeen].h    = h;
+    g_seen[g_nSeen].id   = id;
+    g_seen[g_nSeen].last = GetTickCount();
     g_nSeen++;
 }
 
@@ -584,8 +600,8 @@ static void apply_logged(HWND h, const Rule *r, WinInfo *wi, const WCHAR *why)
 {
     DWORD t0 = GetTickCount();
     int   rc = rule_apply(h, r);
-    if (g_cfg.log) {
-        static const WCHAR *const names[] = { L"OK", L"消滅", L"応答なし", L"ディスプレイなし", L"失敗" };
+    if (g_cfg.log && rc != AP_SAME) {
+        static const WCHAR *const names[] = { L"OK", L"消滅", L"応答なし", L"ディスプレイなし", L"失敗", L"変更なし" };
         log_printf(L"%s: 「%s」 0x%08lX exe=%s class=%s title=%s → %s (%lums)",
                    why, r->name, (DWORD)(ULONG_PTR)h, wininfo_raw(wi, F_EXE), wininfo_raw(wi, F_CLASS),
                    wininfo_raw(wi, F_TITLE), names[rc], GetTickCount() - t0);
@@ -627,7 +643,7 @@ static BOOL find_rule(WinInfo *wi, Rule *out)
     return found;
 }
 
-enum { EV_SHOW, EV_NAME, EV_ALL, EV_FORCE };
+enum { EV_SHOW, EV_NAME, EV_ALL, EV_FORCE, EV_SCAN };
 
 static void evaluate(HWND h, int ev)
 {
@@ -651,10 +667,14 @@ static void evaluate(HWND h, int ev)
         /* キャプションが変わって、当てはまるルールが変わったときだけ */
         if (last == r.id) return;
         break;
+    case EV_SCAN:
+        /* 「定期的に」のルールに合う窓を見回りの対象に加える */
+        if (r.when != WHEN_PERIODIC || last == r.id) return;
+        break;
     }
     seen_set(h, r.id);
 
-    if (r.delay > 0 && ev != EV_FORCE)
+    if (r.delay > 0 && ev != EV_FORCE && ev != EV_SCAN)
         pend_add(h, r.id, r.delay);
     else
         apply_logged(h, &r, &wi, ev == EV_NAME ? L"適用(名前変更)" : L"適用");
@@ -685,22 +705,68 @@ static BOOL CALLBACK enum_cb(HWND h, LPARAM lp)
     return TRUE;
 }
 
+/* 利用者がつかんで動かしている最中の窓には手を出さない */
+static BOOL in_move_size(HWND h)
+{
+    GUITHREADINFO gi;
+    gi.cbSize = sizeof(gi);
+    return GetGUIThreadInfo(GetWindowThreadProcessId(h, NULL), &gi) &&
+           (gi.flags & GUI_INMOVESIZE) && gi.hwndMoveSize == h;
+}
+
+/* 「定期的に」の見回り。対象は、これまでに「定期的に」のルールを当てた窓だけ
+   (全部の窓を数え直すことはしない)。位置が合っていれば rule_apply は何もしない。 */
+static void periodic_run(void)
+{
+    DWORD now = GetTickCount();
+    int   i = 0;
+
+    if (app_paused()) return;
+    while (i < g_nSeen) {
+        Seen *s = &g_seen[i];
+        Rule  r;
+        if (!IsWindow(s->h)) { *s = g_seen[--g_nSeen]; continue; }
+        if (rule_by_id(s->id, &r) && r.when == WHEN_PERIODIC &&
+            (LONG)(now - s->last) >= r.interval - USER_TIMER_MINIMUM &&
+            IsWindowVisible(s->h) && !in_move_size(s->h)) {
+            WinInfo wi;
+            s->last = now;
+            wininfo_init(&wi, s->h);
+            apply_logged(s->h, &r, &wi, L"適用(定期)");
+        }
+        i++;
+    }
+}
+
 static void update_flags(void)
 {
-    int i;
+    int  i, period = 0;
     BOOL any = FALSE;
     AcquireSRWLockShared(&g_cfgLock);
-    for (i = 0; i < g_cfg.count; i++)
-        if (g_cfg.rules[i].enabled && g_cfg.rules[i].cond[F_TITLE].mode != M_ANY) any = TRUE;
+    for (i = 0; i < g_cfg.count; i++) {
+        const Rule *r = &g_cfg.rules[i];
+        if (!r->enabled) continue;
+        if (r->cond[F_TITLE].mode != M_ANY) any = TRUE;
+        if (r->when == WHEN_PERIODIC && (!period || r->interval < period)) period = r->interval;
+    }
     ReleaseSRWLockShared(&g_cfgLock);
     g_anyTitle = any;
+    g_periodMs = period;
+
+    if (period) {
+        SetTimer(g_engWnd, TIMER_PERIODIC, (UINT)period, NULL);
+        /* 今開いている窓のうち「定期的に」のルールに合うものを見回りに加える */
+        if (!app_paused()) EnumWindows(enum_cb, EV_SCAN);
+    } else
+        KillTimer(g_engWnd, TIMER_PERIODIC);
 }
 
 static LRESULT CALLBACK eng_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 {
     switch (msg) {
     case WM_TIMER:
-        if (wp == TIMER_PENDING) pend_run();
+        if (wp == TIMER_PENDING)  pend_run();
+        if (wp == TIMER_PERIODIC) periodic_run();
         return 0;
     case WM_ENG_CONFIG:
         update_flags();

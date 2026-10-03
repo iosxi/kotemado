@@ -123,12 +123,22 @@ width=900
 height=700
 
 [rule]
-name=K 表示されるたび
+name=K 定期的に
 class=exact:KtmK
 display=1
 x=600
 y=300
+when=periodic
+interval=100
+
+[rule]
+name=R v1 の when=show は定期的にとして読む
+class=exact:KtmR
+display=1
+x=650
+y=350
 when=show
+interval=100
 
 [rule]
 name=L 最初の 1 回だけ
@@ -186,7 +196,8 @@ $procs += Start-Target 'G' @('-title', 'kotemado-G', '-selfmove', '150', '5', '5
 $procs += Start-Target 'H' @('-title', 'kotemado-H', '-unaware', '-life', '1200')
 $procs += Start-Target 'I' @('-title', 'kotemado-I', '-max', '-life', '1200')
 $procs += Start-Target 'J' @('-title', 'kotemado-J', '-max', '-life', '1200')
-$procs += Start-Target 'K' @('-title', 'kotemado-K', '-reshow', '400', '-life', '1200')
+$procs += Start-Target 'K' @('-title', 'kotemado-K', '-selfmove', '400', '5', '5', '-life', '3000')
+$procs += Start-Target 'R' @('-title', 'kotemado-R', '-selfmove', '400', '5', '5', '-life', '1200')
 $procs += Start-Target 'L' @('-title', 'kotemado-L', '-reshow', '400', '-life', '1200')
 $procs += Start-Target 'O' @('-title', 'kotemado-O', '-x', '66', '-y', '77', '-life', '1200')
 $procs += Start-Process -FilePath (Join-Path $Work 'ktm-m-target.exe') -PassThru `
@@ -227,7 +238,9 @@ $cases = @(
     @('I', 'frame', "$($ml+200),$($mt+150),$($ml+1100),$($mt+850)", '最大化を解いて置く'),
     @('J', 'zoomed', '1', '状態「変えない」なら最大化のまま'),
     @('J', 'normal', 'same:I.rect', '…元に戻したときの位置は I と同じ(最大化中の縁の見積もり)'),
-    @('K', 'frame', 'pos:600,300', '「表示されるたび」は再表示でも置き直す'),
+    @('K', 'frame', 'pos:600,300', '「定期的に」はアプリが自分で動いても戻す'),
+    @('K', 'wpc', 'max:12', '…位置が合っている間は触らない(3 秒・100ms 間隔で 30 回見回り)'),
+    @('R', 'frame', 'pos:650,350', 'v1 の when=show は「定期的に」として読む'),
     @('L', 'rect',  'pos:0,0', '「最初の 1 回だけ」は再表示では動かさない'),
     @('M', 'frame', 'pos:700,400', 'プロセス名のワイルドカードだけで指定'),
     @('N', 'frame', 'pos:50,60', '起動前から開いていた窓にも適用'),
@@ -242,7 +255,9 @@ $rows = foreach ($c in $cases) {
     if ($exp -eq 'start') { $exp = '77,88,477,388' }
     if ($exp -like 'same:*') { $o = $exp.Substring(5).Split('.'); $exp = (Read-Result $o[0])[$o[1]] }
     $ok = $false
-    if ($exp -like 'pos:*') {
+    if ($exp -like 'max:*') {
+        $ok = $got -and [int]$got -le [int]$exp.Substring(4)
+    } elseif ($exp -like 'pos:*') {
         $ok = $got -and ($got.Split(',')[0..1] -join ',') -eq $exp.Substring(4)
     } else { $ok = $got -eq $exp }
     if (-not $ok) { $fail++ }

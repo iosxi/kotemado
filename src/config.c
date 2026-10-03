@@ -29,7 +29,7 @@ static const WCHAR *const k_modeNames[M_COUNT] = {
 static const WCHAR *const k_fieldKeys[F_COUNT] = { L"exe", L"class", L"title" };
 static const WCHAR *const k_stateNames[] = { L"keep", L"normal", L"max", L"min" };
 static const WCHAR *const k_topNames[]   = { L"keep", L"on", L"off" };
-static const WCHAR *const k_whenNames[]  = { L"once", L"show" };
+static const WCHAR *const k_whenNames[]  = { L"once", L"periodic" };
 
 UINT rule_new_id(void) { return g_nextId++; }
 
@@ -40,6 +40,7 @@ void rule_defaults(Rule *r)
     r->enabled  = TRUE;
     r->display  = DISP_CURRENT;
     r->visframe = TRUE;
+    r->interval = 1000;
 }
 
 void rule_prepare(Rule *r)
@@ -224,7 +225,17 @@ static void set_rule_key(Rule *r, const WCHAR *k, const WCHAR *v)
     if (!lstrcmpiW(k, L"height"))  { val_parse(v, &r->h, FALSE); return; }
     if (!lstrcmpiW(k, L"state"))   { r->state   = find_name(v, k_stateNames, 4, ST_KEEP);  return; }
     if (!lstrcmpiW(k, L"topmost")) { r->topmost = find_name(v, k_topNames,   3, TOP_KEEP); return; }
-    if (!lstrcmpiW(k, L"when"))    { r->when    = find_name(v, k_whenNames,  2, WHEN_ONCE); return; }
+    if (!lstrcmpiW(k, L"when")) {
+        /* v1 の show(表示されるたびに)は「定期的に」に置き換えた */
+        r->when = !lstrcmpiW(v, L"show") ? WHEN_PERIODIC : find_name(v, k_whenNames, 2, WHEN_ONCE);
+        return;
+    }
+    if (!lstrcmpiW(k, L"interval")) {
+        Val t;
+        if (val_parse(v, &t, FALSE) && t.kind == V_PX)
+            r->interval = t.v < INTERVAL_MIN ? INTERVAL_MIN : t.v > INTERVAL_MAX ? INTERVAL_MAX : t.v;
+        return;
+    }
     if (!lstrcmpiW(k, L"delay")) {
         Val t;
         if (val_parse(v, &t, FALSE) && t.kind == V_PX && t.v >= 0) r->delay = min(t.v, 60000);
@@ -370,6 +381,8 @@ BOOL config_save(void)
         sb_kv(&b, L"when", k_whenNames[r->when]);
         wsprintfW(num, L"%d", r->delay);
         sb_kv(&b, L"delay", num);
+        wsprintfW(num, L"%d", r->interval);
+        sb_kv(&b, L"interval", num);
     }
     if (!b.p) return FALSE;
 

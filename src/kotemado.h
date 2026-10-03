@@ -20,7 +20,7 @@
 #include <shellapi.h>
 
 #define APP_NAME     L"kotemado"
-#define APP_VERSION  L"1.0.0"
+#define APP_VERSION  L"1.1.0"
 
 /* ------------------------------------------------------------------ */
 /*  ルール                                                             */
@@ -40,7 +40,10 @@ enum { ST_KEEP, ST_NORMAL, ST_MAX, ST_MIN };
 /* 最前面 */
 enum { TOP_KEEP, TOP_ON, TOP_OFF };
 /* 適用するタイミング */
-enum { WHEN_ONCE, WHEN_SHOW };
+enum { WHEN_ONCE, WHEN_PERIODIC };
+
+#define INTERVAL_MIN  100        /* 「定期的に」の間隔の下限・上限(ミリ秒) */
+#define INTERVAL_MAX  100000
 
 /* display の特別な値。1 以上は \\.\DISPLAYn の n */
 #define DISP_MAIN     0
@@ -67,6 +70,7 @@ typedef struct {
     BOOL  visframe;         /* 見た目の枠で合わせる */
     Val   x, y, w, h;
     int   state, topmost, when, delay;
+    int   interval;         /* 「定期的に」の間隔(ミリ秒) */
 } Rule;
 
 typedef struct {
@@ -143,7 +147,7 @@ const WCHAR *wininfo_raw(WinInfo *wi, int field);
 BOOL         rule_match(const Rule *r, WinInfo *wi);
 
 /* rule_apply の戻り値 */
-enum { AP_OK, AP_GONE, AP_HUNG, AP_NODISPLAY, AP_FAILED };
+enum { AP_OK, AP_GONE, AP_HUNG, AP_NODISPLAY, AP_FAILED, AP_SAME /* もう合っていた */ };
 int          rule_apply(HWND hwnd, const Rule *r);
 
 void engine_start(void);

@@ -155,6 +155,7 @@ void ui_place_summary(const Rule *r, WCHAR *buf, int cch)
     if (r->topmost == TOP_ON)  ADD(L"最前面");
     if (r->topmost == TOP_OFF) ADD(L"最前面を解除");
     if (r->delay > 0) { wsprintfW(part, L"%dms 後", r->delay); ADD(part); }
+    if (r->when == WHEN_PERIODIC) { wsprintfW(part, L"定期 %dms", r->interval); ADD(part); }
     if (!buf[0]) lstrcpynW(buf, L"（何もしない）", cch);
 #undef ADD
 }

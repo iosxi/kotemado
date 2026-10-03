@@ -1,7 +1,7 @@
 /* ==================================================================
  * ui_rule.c - ルールの編集
  *
- *  照準(左上の丸)をつかんでウィンドウまでドラッグすると、その
+ *  照準(左上の丸)をクリックし、続けてウィンドウをクリックすると、その
  *  プロセス名・クラス名・キャプションを入れる。新しいルールなら、
  *  そのウィンドウの今の位置と大きさも入れる。
  *  「先にウィンドウを置きたい場所へ置いてから照準を当てる」だけで
@@ -16,8 +16,8 @@ typedef struct {
     Rule    r;
     BOOL    isNew;
     HWND    picked;         /* 照準で選んだウィンドウ */
-    HWND    hover;          /* ドラッグ中になぞっているウィンドウ */
-    BOOL    dragging;
+    HWND    hover;          /* 選択中にマウスの下にあるウィンドウ */
+    BOOL    picking;        /* 照準をクリックして、選ぶウィンドウを待っている */
     DlgLook look;
 } RuleDlg;
 
@@ -90,6 +90,15 @@ static void sync_enable(HWND dlg)
         EnableWindow(GetDlgItem(dlg, k_textIds[f]), combo_data(dlg, k_modeIds[f]) != M_ANY);
 }
 
+/* 間隔は「定期的に」のときだけ使う */
+static void sync_when(HWND dlg)
+{
+    BOOL on = combo_data(dlg, IDC_WHEN) == WHEN_PERIODIC;
+    EnableWindow(GetDlgItem(dlg, IDC_INTERVAL), on);
+    EnableWindow(GetDlgItem(dlg, IDC_INTERVAL_LBL), on);
+    EnableWindow(GetDlgItem(dlg, IDC_INTERVAL_UNIT), on);
+}
+
 static void load_fields(HWND dlg, const Rule *r)
 {
     static const WCHAR *const modes[M_COUNT] = {
@@ -132,10 +141,13 @@ static void load_fields(HWND dlg, const Rule *r)
     combo_select_data(dlg, IDC_TOPMOST, r->topmost);
 
     combo_add(dlg, IDC_WHEN, L"ウィンドウごとに最初の 1 回だけ", WHEN_ONCE);
-    combo_add(dlg, IDC_WHEN, L"表示されるたびに", WHEN_SHOW);
+    combo_add(dlg, IDC_WHEN, L"定期的に（ずれたら戻す）", WHEN_PERIODIC);
     combo_select_data(dlg, IDC_WHEN, r->when);
+    SetDlgItemInt(dlg, IDC_INTERVAL, (UINT)r->interval, FALSE);
+    SendDlgItemMessageW(dlg, IDC_INTERVAL, EM_SETLIMITTEXT, 6, 0);
     SetDlgItemInt(dlg, IDC_DELAY, (UINT)r->delay, FALSE);
     SendDlgItemMessageW(dlg, IDC_DELAY, EM_SETLIMITTEXT, 5, 0);
+    sync_when(dlg);
 }
 
 static BOOL bad(HWND dlg, int id, const WCHAR *msg)
@@ -193,6 +205,12 @@ static BOOL collect(HWND dlg, Rule *out)
     out->state    = (int)combo_data(dlg, IDC_STATE);
     out->topmost  = (int)combo_data(dlg, IDC_TOPMOST);
     out->when     = (int)combo_data(dlg, IDC_WHEN);
+    d = GetDlgItemInt(dlg, IDC_INTERVAL, &ok, FALSE);
+    if (out->when == WHEN_PERIODIC && (!ok || d < INTERVAL_MIN || d > INTERVAL_MAX)) {
+        wsprintfW(msg, L"間隔は %d〜%d ミリ秒で指定してください。", INTERVAL_MIN, INTERVAL_MAX);
+        return bad(dlg, IDC_INTERVAL, msg);
+    }
+    if (ok && d >= INTERVAL_MIN && d <= INTERVAL_MAX) out->interval = (int)d;
     d = GetDlgItemInt(dlg, IDC_DELAY, &ok, FALSE);
     if (!ok) d = 0;
     if (d > 60000) return bad(dlg, IDC_DELAY, L"遅延は 60000 ミリ秒までです。");
@@ -281,7 +299,8 @@ static void do_try(HWND dlg, RuleDlg *d)
     EnumWindows(scan_cb, (LPARAM)&s);
     for (i = 0; i < s.n; i++) {
         switch (rule_apply(s.found[i], &r)) {
-        case AP_OK:        ok++;     break;
+        case AP_OK:
+        case AP_SAME:      ok++;     break;
         case AP_NODISPLAY: nodisp++; break;
         case AP_GONE:      break;
         default:           fail++;   break;
@@ -411,71 +430,154 @@ static void show_hover_info(HWND dlg, HWND w)
     SetDlgItemTextW(dlg, IDC_FINDER_INFO, line);
 }
 
+/*  照準は 2 クリックで使う。照準をクリックすると「選択中」になり、
+ *  次にクリックしたウィンドウを選ぶ。ボタンを離した後は SetCapture では
+ *  ほかのアプリの上のマウスを受け取れないので、選択中だけ低レベル
+ *  マウス フック(WH_MOUSE_LL)を掛けて動きを追う。選ぶためのクリックは、
+ *  相手のアプリに届かないよう押下も離上も握りつぶす。
+ *  右クリック・Esc・kotemado 自身の画面の上でのクリックで中止。
+ *  フックはこのスレッド(設定画面)のメッセージ処理の中で呼ばれる。 */
+
+#define WM_APP_PICKMOVE  (WM_APP + 22)
+#define WM_APP_PICKCLICK (WM_APP + 23)   /* wParam: 1 = 左(選ぶ) / 0 = 右(中止)、lParam: 位置 */
+#define WM_APP_UNHOOK    (WM_APP + 24)
+
+static HHOOK g_mouseHook;
+static HWND  g_hookDlg;         /* 知らせる先 */
+static BOOL  g_hookPicking;     /* 選択中 */
+static BOOL  g_swallowUp;       /* 握りつぶした押下に対応する離上も握りつぶす */
+static BOOL  g_movePosted;      /* 動きの知らせが処理待ち(何通も溜めない) */
+
+static LRESULT CALLBACK mouse_ll(int code, WPARAM wp, LPARAM lp)
+{
+    if (code == HC_ACTION && g_hookDlg) {
+        const MSLLHOOKSTRUCT *m = (const MSLLHOOKSTRUCT *)lp;
+        switch (wp) {
+        case WM_MOUSEMOVE:
+            if (g_hookPicking && !g_movePosted) {
+                g_movePosted = TRUE;
+                PostMessageW(g_hookDlg, WM_APP_PICKMOVE, 0, 0);
+            }
+            break;
+        case WM_LBUTTONDOWN:
+        case WM_RBUTTONDOWN:
+            if (g_hookPicking) {
+                g_hookPicking = FALSE;
+                g_swallowUp   = TRUE;
+                PostMessageW(g_hookDlg, WM_APP_PICKCLICK, wp == WM_LBUTTONDOWN,
+                             MAKELPARAM((WORD)m->pt.x, (WORD)m->pt.y));
+                return 1;
+            }
+            break;
+        case WM_LBUTTONUP:
+        case WM_RBUTTONUP:
+            if (g_swallowUp) {
+                g_swallowUp = FALSE;
+                PostMessageW(g_hookDlg, WM_APP_UNHOOK, 0, 0);
+                return 1;
+            }
+            break;
+        }
+    }
+    return CallNextHookEx(NULL, code, wp, lp);
+}
+
+static void pick_unhook(void)
+{
+    if (g_mouseHook) UnhookWindowsHookEx(g_mouseHook);
+    g_mouseHook   = NULL;
+    g_hookDlg     = NULL;
+    g_hookPicking = FALSE;
+    g_swallowUp   = FALSE;
+}
+
+/* pt の下にあるトップレベル ウィンドウ。kotemado 自身のものなら NULL */
+static HWND window_at(POINT pt)
+{
+    HWND  w = WindowFromPoint(pt);
+    DWORD pid = 0;
+    if (w) w = GetAncestor(w, GA_ROOT);
+    if (w) {
+        GetWindowThreadProcessId(w, &pid);
+        if (pid == GetCurrentProcessId()) w = NULL;
+    }
+    return w;
+}
+
+#define FINDER_HINT L"左の照準をクリックし、続けて目的のウィンドウをクリックすると、下の欄が埋まります。"
+
+static void pick_start(HWND dlg, RuleDlg *d)
+{
+    if (d->picking) return;
+    if (!g_mouseHook) g_mouseHook = SetWindowsHookExW(WH_MOUSE_LL, mouse_ll, g_inst, 0);
+    if (!g_mouseHook) {
+        ui_message(dlg, L"ウィンドウを選ぶ準備ができませんでした。", NULL, 0, TD_ERROR_ICON);
+        return;
+    }
+    g_hookDlg     = dlg;
+    g_hookPicking = TRUE;
+    g_swallowUp   = FALSE;
+    g_movePosted  = FALSE;
+    d->picking    = TRUE;
+    d->hover      = NULL;
+    SetFocus(GetDlgItem(dlg, IDC_FINDER));      /* Esc を受けるため */
+    SetDlgItemTextW(dlg, IDC_FINDER_HINT,
+                    L"選びたいウィンドウをクリックしてください。右クリックか Esc で中止します。");
+    InvalidateRect(GetDlgItem(dlg, IDC_FINDER), NULL, TRUE);
+}
+
+/* 選択中を終える。chosen が NULL なら中止 */
+static void pick_end(HWND dlg, RuleDlg *d, HWND chosen)
+{
+    if (!d->picking) return;
+    d->picking    = FALSE;
+    g_hookPicking = FALSE;
+    if (!g_swallowUp) pick_unhook();            /* 握りつぶす離上が残っていれば、それを待って外す */
+    highlight_hide();
+    SetDlgItemTextW(dlg, IDC_FINDER_HINT, FINDER_HINT);
+    show_hover_info(dlg, chosen);
+    InvalidateRect(GetDlgItem(dlg, IDC_FINDER), NULL, TRUE);
+    if (chosen && IsWindow(chosen)) on_picked(dlg, d, chosen);
+}
+
+static void pick_move(HWND dlg, RuleDlg *d)
+{
+    POINT pt;
+    HWND  w;
+
+    g_movePosted = FALSE;
+    if (!d->picking) return;
+    GetCursorPos(&pt);
+    w = window_at(pt);
+    if (w != d->hover) {
+        RECT r;
+        d->hover = w;
+        if (w && window_visible_rect(w, &r)) highlight_show(&r);
+        else highlight_hide();
+        show_hover_info(dlg, w);
+    }
+}
+
 static LRESULT CALLBACK finder_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, DWORD_PTR ref)
 {
     RuleDlg *d   = (RuleDlg *)ref;
     HWND     dlg = GetParent(h);
 
     switch (msg) {
-    case WM_LBUTTONDOWN:
-        d->dragging = TRUE;
-        d->hover    = NULL;
-        SetFocus(h);
-        SetCapture(h);
-        SetCursor(LoadCursorW(NULL, IDC_CROSS));
-        InvalidateRect(h, NULL, TRUE);
-        return 0;
-
-    case WM_MOUSEMOVE:
-        if (d->dragging) {
-            POINT pt;
-            HWND  w;
-            DWORD pid = 0;
-            GetCursorPos(&pt);
-            w = WindowFromPoint(pt);
-            if (w) w = GetAncestor(w, GA_ROOT);
-            if (w) {
-                GetWindowThreadProcessId(w, &pid);
-                if (pid == GetCurrentProcessId()) w = NULL;
-            }
-            if (w != d->hover) {
-                RECT r;
-                d->hover = w;
-                if (w && window_visible_rect(w, &r)) highlight_show(&r);
-                else highlight_hide();
-                show_hover_info(dlg, w);
-            }
-        }
-        return 0;
-
-    case WM_LBUTTONUP:
-        if (d->dragging) {
-            HWND w = d->hover;
-            ReleaseCapture();           /* 後片付けは WM_CAPTURECHANGED で */
-            if (w && IsWindow(w)) SendMessageW(dlg, WM_APP_PICKED, (WPARAM)w, 0);
-        }
+    case WM_LBUTTONUP:              /* 1 回目のクリック。次のクリックで選ぶ */
+        pick_start(dlg, d);
         return 0;
 
     case WM_KEYDOWN:
-        if (d->dragging && wp == VK_ESCAPE) {
-            d->hover = NULL;
-            ReleaseCapture();
-            show_hover_info(dlg, NULL);
+        if (d->picking && wp == VK_ESCAPE) {
+            pick_end(dlg, d, NULL);
             return 0;
         }
         break;
 
     case WM_GETDLGCODE:
-        if (d->dragging) return DLGC_WANTALLKEYS;
+        if (d->picking) return DLGC_WANTALLKEYS;
         break;
-
-    case WM_CAPTURECHANGED:
-        if (d->dragging) {
-            d->dragging = FALSE;
-            highlight_hide();
-            InvalidateRect(h, NULL, TRUE);
-        }
-        return 0;
 
     case WM_NCDESTROY:
         RemoveWindowSubclass(h, finder_proc, id);
@@ -484,7 +586,7 @@ static LRESULT CALLBACK finder_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT
     return DefSubclassProc(h, msg, wp, lp);
 }
 
-/* 照準の絵。ドラッグ中は照準がカーソルに移ったように見せるため、空の丸だけにする */
+/* 照準の絵。選択中は照準がカーソルに移ったように見せるため、空の丸だけにする */
 static void draw_finder(const DRAWITEMSTRUCT *di, BOOL dragging)
 {
     RECT   r = di->rcItem;
@@ -560,7 +662,7 @@ static INT_PTR CALLBACK rule_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 
     case WM_DRAWITEM:
         if (wp == IDC_FINDER) {
-            draw_finder((const DRAWITEMSTRUCT *)lp, d && d->dragging);
+            draw_finder((const DRAWITEMSTRUCT *)lp, d && d->picking);
             return TRUE;
         }
         break;
@@ -579,10 +681,27 @@ static INT_PTR CALLBACK rule_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         if (IsWindow((HWND)wp)) on_picked(h, d, (HWND)wp);
         return TRUE;
 
+    case WM_APP_PICKMOVE:
+        pick_move(h, d);
+        return TRUE;
+    case WM_APP_PICKCLICK: {
+        POINT pt;
+        pt.x = (short)LOWORD(lp);
+        pt.y = (short)HIWORD(lp);
+        pick_end(h, d, wp ? window_at(pt) : NULL);
+        return TRUE;
+    }
+    case WM_APP_UNHOOK:
+        if (!d->picking) pick_unhook();
+        return TRUE;
+
     case WM_COMMAND:
         switch (LOWORD(wp)) {
         case IDC_M_EXE: case IDC_M_CLASS: case IDC_M_TITLE:
             if (HIWORD(wp) == CBN_SELCHANGE) sync_enable(h);
+            return TRUE;
+        case IDC_WHEN:
+            if (HIWORD(wp) == CBN_SELCHANGE) sync_when(h);
             return TRUE;
         case IDC_CHECK: do_check(h, d); return TRUE;
         case IDC_GRAB:  do_grab(h, d);  return TRUE;
@@ -606,6 +725,7 @@ static INT_PTR CALLBACK rule_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         break;
 
     case WM_DESTROY:
+        pick_unhook();
         highlight_hide();
         if (d) dlg_look_free(&d->look);
         RemovePropW(h, L"kotemado.footer");

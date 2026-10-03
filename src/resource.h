@@ -52,6 +52,9 @@
 #define IDC_DELAY          1142
 #define IDC_HINT_DELAY     1143
 #define IDC_TRY            1144
+#define IDC_INTERVAL       1145
+#define IDC_INTERVAL_LBL   1146
+#define IDC_INTERVAL_UNIT  1147
 
 /* トレイのメニュー */
 #define IDM_SETTINGS       2000
