@@ -1,0 +1,135 @@
+#pragma code_page(65001)
+#include <windows.h>
+#include <commctrl.h>
+#include "resource.h"
+
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
+// ツールチェーン既定の manifest と同じ言語にして置き換えさせる
+CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "kotemado.manifest"
+
+LANGUAGE LANG_JAPANESE, SUBLANG_DEFAULT
+IDI_APP ICON "kotemado.ico"
+
+// ------------------------------------------------------------------
+//  設定画面
+// ------------------------------------------------------------------
+IDD_MAIN DIALOGEX 0, 0, 460, 272
+STYLE DS_SHELLFONT | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX
+EXSTYLE WS_EX_APPWINDOW
+CAPTION "kotemado"
+FONT 9, "Yu Gothic UI", 400, 0, 0x80
+BEGIN
+    LTEXT           "ルール", IDC_H_RULES, 12, 9, 200, 11
+    LTEXT           "上から順に調べ、最初に条件が合ったルールでウィンドウを配置します。チェックを外したルールは使いません。",
+                    IDC_HINT_RULES, 12, 22, 436, 9
+    CONTROL         "", IDC_LIST, "SysListView32",
+                    LVS_REPORT | LVS_SHOWSELALWAYS | LVS_SINGLESEL | LVS_NOSORTHEADER | WS_BORDER | WS_TABSTOP,
+                    12, 35, 370, 142
+    PUSHBUTTON      "追加(&A)...", IDC_ADD, 390, 35, 58, 15
+    PUSHBUTTON      "編集(&E)...", IDC_EDITRULE, 390, 54, 58, 15
+    PUSHBUTTON      "複製(&C)", IDC_DUP, 390, 73, 58, 15
+    PUSHBUTTON      "削除(&D)", IDC_DEL, 390, 92, 58, 15
+    PUSHBUTTON      "上へ(&U)", IDC_UP, 390, 124, 58, 15
+    PUSHBUTTON      "下へ(&N)", IDC_DOWN, 390, 143, 58, 15
+
+    LTEXT           "全般", IDC_H_GENERAL, 12, 189, 200, 11
+    AUTOCHECKBOX    "Windows の起動時に kotemado を開始する(&S)", IDC_STARTUP, 12, 203, 436, 10
+    AUTOCHECKBOX    "kotemado の開始時に、すでに開いているウィンドウにも適用する(&X)", IDC_APPLYEXIST, 12, 217, 436, 10
+    LTEXT           "", IDC_INIPATH, 12, 231, 436, 9, SS_PATHELLIPSIS | SS_NOPREFIX
+
+    PUSHBUTTON      "ディスプレイ番号を表示(&I)", IDC_IDENTIFY, 12, 250, 100, 15
+    PUSHBUTTON      "今すぐ適用(&P)", IDC_APPLYNOW, 116, 250, 64, 15
+    PUSHBUTTON      "閉じる", IDCANCEL, 390, 250, 58, 15
+END
+
+// ------------------------------------------------------------------
+//  ルールの編集
+// ------------------------------------------------------------------
+IDD_RULE DIALOGEX 0, 0, 340, 340
+STYLE DS_SHELLFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "ルールの編集"
+FONT 9, "Yu Gothic UI", 400, 0, 0x80
+BEGIN
+    LTEXT           "名前(&M)", -1, 12, 11, 54, 9
+    EDITTEXT        IDC_NAME, 68, 9, 196, 14, ES_AUTOHSCROLL
+    AUTOCHECKBOX    "有効(&V)", IDC_ENABLED, 276, 11, 52, 10
+
+    LTEXT           "対象のウィンドウ", IDC_H_TARGET, 12, 30, 200, 11
+    CONTROL         "", IDC_FINDER, "Static", SS_OWNERDRAW | SS_NOTIFY, 12, 44, 20, 20
+    LTEXT           "左の照準をつかみ、目的のウィンドウまでドラッグして離すと、下の欄が埋まります。",
+                    IDC_FINDER_HINT, 40, 44, 288, 9
+    LTEXT           "", IDC_FINDER_INFO, 40, 55, 288, 9, SS_NOPREFIX | SS_ENDELLIPSIS
+
+    LTEXT           "プロセス名(&P)", -1, 12, 72, 54, 9
+    COMBOBOX        IDC_M_EXE, 68, 70, 70, 120, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    EDITTEXT        IDC_T_EXE, 142, 70, 186, 14, ES_AUTOHSCROLL
+    LTEXT           "クラス名(&L)", -1, 12, 88, 54, 9
+    COMBOBOX        IDC_M_CLASS, 68, 86, 70, 120, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    EDITTEXT        IDC_T_CLASS, 142, 86, 186, 14, ES_AUTOHSCROLL
+    LTEXT           "キャプション(&T)", -1, 12, 104, 54, 9
+    COMBOBOX        IDC_M_TITLE, 68, 102, 70, 120, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    EDITTEXT        IDC_T_TITLE, 142, 102, 186, 14, ES_AUTOHSCROLL
+    LTEXT           "「指定しない」以外の項目がすべて合うウィンドウが対象です。キャプションのないウィンドウは「完全一致」で空欄にします。",
+                    IDC_HINT_COND, 68, 120, 196, 19
+    PUSHBUTTON      "該当を確認(&K)", IDC_CHECK, 270, 120, 58, 15
+
+    LTEXT           "配置", IDC_H_PLACE, 12, 145, 200, 11
+    LTEXT           "ディスプレイ(&D)", -1, 12, 161, 54, 9
+    COMBOBOX        IDC_DISPLAY, 68, 159, 260, 150, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "基準(&B)", -1, 12, 177, 54, 9
+    COMBOBOX        IDC_BASE, 68, 175, 260, 60, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "X 座標(&X)", -1, 12, 193, 54, 9
+    EDITTEXT        IDC_X, 68, 191, 48, 14, ES_AUTOHSCROLL
+    LTEXT           "Y 座標(&Y)", -1, 124, 193, 36, 9
+    EDITTEXT        IDC_Y, 162, 191, 48, 14, ES_AUTOHSCROLL
+    LTEXT           "幅(&W)", -1, 12, 209, 54, 9
+    EDITTEXT        IDC_W, 68, 207, 48, 14, ES_AUTOHSCROLL
+    LTEXT           "高さ(&H)", -1, 124, 209, 36, 9
+    EDITTEXT        IDC_HGT, 162, 207, 48, 14, ES_AUTOHSCROLL
+    PUSHBUTTON      "今の位置を取り込む(&G)", IDC_GRAB, 222, 191, 106, 15
+    LTEXT           "空欄＝変えない　数値＝ピクセル　50%＝基準に対する割合　中央（X・Y のみ）",
+                    IDC_HINT_POS, 68, 224, 260, 9
+    AUTOCHECKBOX    "見た目の枠で合わせる（Windows 10/11 の透明な縁を数えない）(&F)", IDC_VISFRAME, 68, 236, 260, 10
+    LTEXT           "状態(&S)", -1, 12, 253, 54, 9
+    COMBOBOX        IDC_STATE, 68, 251, 90, 100, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "最前面(&O)", -1, 170, 253, 40, 9
+    COMBOBOX        IDC_TOPMOST, 212, 251, 116, 100, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+
+    LTEXT           "タイミング", IDC_H_TIMING, 12, 272, 200, 11
+    LTEXT           "適用(&N)", -1, 12, 288, 54, 9
+    COMBOBOX        IDC_WHEN, 68, 286, 160, 100, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "遅延(&R)", -1, 236, 288, 28, 9
+    EDITTEXT        IDC_DELAY, 266, 286, 36, 14, ES_NUMBER | ES_AUTOHSCROLL
+    LTEXT           "ミリ秒", -1, 306, 288, 24, 9
+    LTEXT           "表示の直後に自分で位置を戻すアプリには、遅延を 200〜500 ミリ秒ほど入れます。",
+                    IDC_HINT_DELAY, 68, 303, 260, 9
+
+    PUSHBUTTON      "今すぐ試す(&Z)", IDC_TRY, 12, 320, 64, 15
+    DEFPUSHBUTTON   "OK", IDOK, 210, 320, 56, 15
+    PUSHBUTTON      "キャンセル", IDCANCEL, 272, 320, 56, 15
+END
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,0,0,0
+ PRODUCTVERSION 1,0,0,0
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "041104b0"
+        BEGIN
+            VALUE "CompanyName", "nekoryu"
+            VALUE "FileDescription", "kotemado - ウィンドウの位置と大きさを固定"
+            VALUE "FileVersion", "1.0.0"
+            VALUE "ProductName", "kotemado"
+            VALUE "ProductVersion", "1.0.0"
+            VALUE "Comments", "条件に合うウィンドウを、指定したディスプレイの指定した位置・大きさに置きます"
+            VALUE "OriginalFilename", "kotemado.exe"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0411, 1200
+    END
+END
