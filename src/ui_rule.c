@@ -372,9 +372,10 @@ static void on_picked(HWND dlg, RuleDlg *d, HWND w)
     wininfo_init(&wi, w);
     for (f = 0; f < F_COUNT; f++) {
         SetDlgItemTextW(dlg, k_textIds[f], wininfo_raw(&wi, f));
-        /* プロセス名とクラス名は完全一致を既定にする。キャプションは
-           開く文書で変わることが多いので、指定するかどうかは任せる */
-        if (f != F_TITLE && combo_data(dlg, k_modeIds[f]) == M_ANY)
+        /* 3 項目とも完全一致で入れ、利用者に削ってもらう。キャプションが
+           空なら「完全一致・空欄」= キャプションのないウィンドウの指定になる。
+           すでに一致方法を選んであれば、それは変えない */
+        if (combo_data(dlg, k_modeIds[f]) == M_ANY)
             combo_select_data(dlg, k_modeIds[f], M_EXACT);
     }
     sync_enable(dlg);

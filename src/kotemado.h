@@ -20,7 +20,7 @@
 #include <shellapi.h>
 
 #define APP_NAME     L"kotemado"
-#define APP_VERSION  L"1.1.0"
+#define APP_VERSION  L"1.2.0"
 
 /* ------------------------------------------------------------------ */
 /*  ルール                                                             */
