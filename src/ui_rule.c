@@ -18,6 +18,7 @@ typedef struct {
     HWND    picked;         /* 照準で選んだウィンドウ */
     HWND    hover;          /* 選択中にマウスの下にあるウィンドウ */
     BOOL    picking;        /* 照準をクリックして、選ぶウィンドウを待っている */
+    BOOL    accepted;       /* OK で入力の検証を通った */
     DlgLook look;
 } RuleDlg;
 
@@ -715,7 +716,8 @@ static INT_PTR CALLBACK rule_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
                 for (f = 0; f < F_COUNT && !r.name[0]; f++)
                     if (r.cond[f].mode != M_ANY) lstrcpynW(r.name, r.cond[f].text, NAME_MAX_);
             }
-            d->r = r;
+            d->r        = r;
+            d->accepted = TRUE;
             EndDialog(h, IDOK);
             return TRUE;
         }
@@ -742,8 +744,11 @@ BOOL ui_edit_rule(HWND owner, Rule *r, BOOL isNew)
     ZeroMemory(&d, sizeof(d));
     d.r     = *r;
     d.isNew = isNew;
-    if (DialogBoxParamW(g_inst, MAKEINTRESOURCEW(IDD_RULE), owner, rule_proc, (LPARAM)&d) != IDOK)
-        return FALSE;
+    /* 戻り値ではなく accepted で判断する。画面を開いたまま kotemado が終了すると
+       (WM_QUIT が届くと)、OK を押していないのに IDOK と同じ値で戻ることがあり、
+       既定値のままのルールが追加されてしまった(v3 まで)。 */
+    DialogBoxParamW(g_inst, MAKEINTRESOURCEW(IDD_RULE), owner, rule_proc, (LPARAM)&d);
+    if (!d.accepted) return FALSE;
     *r = d.r;
     return TRUE;
 }

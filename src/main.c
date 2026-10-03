@@ -66,57 +66,6 @@ void log_printf(const WCHAR *fmt, ...)
 }
 
 /* ------------------------------------------------------------------ */
-/*  スタートアップ(スタートアップ フォルダのショートカット)            */
-/* ------------------------------------------------------------------ */
-
-static BOOL startup_link(WCHAR *out)
-{
-    PWSTR p = NULL;
-    if (FAILED(SHGetKnownFolderPath(&FOLDERID_Startup, 0, NULL, &p))) return FALSE;
-    wsprintfW(out, L"%s\\kotemado.lnk", p);
-    CoTaskMemFree(p);
-    return TRUE;
-}
-
-BOOL startup_enabled(void)
-{
-    WCHAR lnk[MAX_PATH + 32];
-    return startup_link(lnk) && GetFileAttributesW(lnk) != INVALID_FILE_ATTRIBUTES;
-}
-
-BOOL startup_set(BOOL on)
-{
-    WCHAR         lnk[MAX_PATH + 32], dir[MAX_PATH], args[MAX_PATH + 16];
-    IShellLinkW  *sl = NULL;
-    IPersistFile *pf = NULL;
-    HRESULT       hr;
-    WCHAR        *s;
-
-    if (!startup_link(lnk)) return FALSE;
-    if (!on) return DeleteFileW(lnk) || GetLastError() == ERROR_FILE_NOT_FOUND;
-
-    hr = CoCreateInstance(&CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, &IID_IShellLinkW, (void **)&sl);
-    if (FAILED(hr)) return FALSE;
-    lstrcpynW(dir, g_exePath, MAX_PATH);
-    for (s = dir + lstrlenW(dir); s > dir && s[-1] != L'\\'; s--) ;
-    if (s > dir) s[-1] = 0;
-    sl->lpVtbl->SetPath(sl, g_exePath);
-    sl->lpVtbl->SetWorkingDirectory(sl, dir);
-    sl->lpVtbl->SetDescription(sl, L"kotemado - ウィンドウの位置と大きさを固定");
-    if (g_customIni) {
-        wsprintfW(args, L"-ini \"%s\"", g_iniPath);
-        sl->lpVtbl->SetArguments(sl, args);
-    }
-    hr = sl->lpVtbl->QueryInterface(sl, &IID_IPersistFile, (void **)&pf);
-    if (SUCCEEDED(hr)) {
-        hr = pf->lpVtbl->Save(pf, lnk, TRUE);
-        pf->lpVtbl->Release(pf);
-    }
-    sl->lpVtbl->Release(sl);
-    return SUCCEEDED(hr);
-}
-
-/* ------------------------------------------------------------------ */
 /*  一時停止とトレイ                                                    */
 /* ------------------------------------------------------------------ */
 
@@ -343,7 +292,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
         if (lstrlenW(g_logPath) + 5 < MAX_PATH) lstrcatW(g_logPath, L".log");
     }
 
-    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
     icc.dwSize = sizeof(icc);
     icc.dwICC  = ICC_LISTVIEW_CLASSES | ICC_STANDARD_CLASSES;
     InitCommonControlsEx(&icc);
@@ -382,7 +330,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
 
     engine_stop();
     log_printf(L"kotemado 終了");
-    CoUninitialize();
     if (mutex) CloseHandle(mutex);
     return 0;
 }

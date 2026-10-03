@@ -159,7 +159,6 @@ static INT_PTR CALLBACK main_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         dlg_look_init(h, &g_look, k_headings, ARRAYSIZE(k_headings), IDCANCEL);
         setup_list();
         fill_list(g_cfg.count ? 0 : -1);
-        CheckDlgButton(h, IDC_STARTUP, startup_enabled() ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(h, IDC_APPLYEXIST, g_cfg.applyExisting ? BST_CHECKED : BST_UNCHECKED);
         wsprintfW(t, L"設定ファイル: %s", g_iniPath);
         SetDlgItemTextW(h, IDC_INIPATH, t);
@@ -236,14 +235,6 @@ static INT_PTR CALLBACK main_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         case IDC_APPLYEXIST:
             config_set_apply_existing(IsDlgButtonChecked(h, IDC_APPLYEXIST) == BST_CHECKED);
             return TRUE;
-        case IDC_STARTUP: {
-            BOOL on = IsDlgButtonChecked(h, IDC_STARTUP) == BST_CHECKED;
-            if (!startup_set(on)) {
-                ui_message(h, L"スタートアップの設定を変更できませんでした。", NULL, 0, TD_ERROR_ICON);
-                CheckDlgButton(h, IDC_STARTUP, startup_enabled() ? BST_CHECKED : BST_UNCHECKED);
-            }
-            return TRUE;
-        }
         }
         break;
 

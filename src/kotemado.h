@@ -20,7 +20,7 @@
 #include <shellapi.h>
 
 #define APP_NAME     L"kotemado"
-#define APP_VERSION  L"1.2.0"
+#define APP_VERSION  L"1.3.0"
 
 /* ------------------------------------------------------------------ */
 /*  ルール                                                             */
@@ -102,9 +102,6 @@ void app_set_paused(BOOL on);
 BOOL app_paused(void);
 void tray_update(void);
 
-/* スタートアップフォルダのショートカット(レジストリは使わない) */
-BOOL startup_enabled(void);
-BOOL startup_set(BOOL on);
 
 /* ------------------------------------------------------------------ */
 /*  config.c                                                           */

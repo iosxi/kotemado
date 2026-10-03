@@ -14,7 +14,6 @@
 #define IDC_UP             1007
 #define IDC_DOWN           1008
 #define IDC_H_GENERAL      1009
-#define IDC_STARTUP        1010
 #define IDC_APPLYEXIST     1011
 #define IDC_INIPATH        1012
 #define IDC_IDENTIFY       1013
