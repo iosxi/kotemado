@@ -38,9 +38,11 @@
   `WM_APP+23`（wParam 1 = 左クリック / 0 = 右クリック、lParam = 画面座標）を送ると
   フックが送るのと同じ知らせになる。`WM_APP_PICKED`（`WM_APP+21`）は選んだ後の取り込みだけ。
   検証用の窓は `-topmost` で出す（他の窓の下だと、その位置の別のウィンドウを拾う）。
-- **利用者が普段使っている kotemado は `kotemado.exe`（既定の ini）で動いている。**
-  編集画面を開いたままのことがあるので勝手に止めない。exe を上書きできないときは、
-  実行中の exe を `build/` へ改名して退避すれば作り直せる（実行中でも改名はできる）。
+- **利用者が普段使っている kotemado は `kotemado.exe`（既定の ini、引数なし）で動いている。**
+  直すときは止めてよい（`C:\projects\windows\CLAUDE.md` の全共通の方針）。
+  `kotemado.exe -exit` で止め、作り直したら引数なしで起動し直す。
+  `-exit` は同じ設定ファイルで動いているものにしか効かない。既定の設定ファイルは exe の隣なので、
+  exe を別の場所から呼ぶときは `-ini C:\projects\windows\kotemado\kotemado.ini` を付ける。
   利用者の `kotemado.ini` はリポジトリのフォルダにできるが `.gitignore` 済み。
 - 検証で起動した kotemado は **`-ini <検証用> -exit` で止める。** `Stop-Process` で殺すと
   トレイにアイコンの抜け殻が残る。
